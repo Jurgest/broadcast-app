@@ -1,14 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { connectSocket, disconnectSocket, getSocket } from '../utils/socket';
+import { useCollaborativeSession } from './useCollaborativeSession';
 import type { User, SessionState, Message, CounterUpdate, TypingUser } from '../types';
 
 export const useBroadcast = (sessionId: string, currentUser: User) => {
   const [isConnected, setIsConnected] = useState(false);
-  const [users, setUsers] = useState<User[]>([currentUser]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [counter, setCounter] = useState(0);
-  const [lastCounterUpdate, setLastCounterUpdate] = useState<CounterUpdate | null>(null);
-  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  
+  // Use collaborative session for cross-tab sync
+  const session = useCollaborativeSession({
+    sessionId,
+    user: currentUser,
+    enableBroadcastChannel: true,
+  });
 
   // Connect to socket and join session
   useEffect(() => {
@@ -17,6 +20,7 @@ export const useBroadcast = (sessionId: string, currentUser: User) => {
     const handleConnect = () => {
       console.log('Connected to server');
       setIsConnected(true);
+      session.updateConnectionStatus(true);
       
       // Join the session
       socket.emit('join-session', {
@@ -28,57 +32,48 @@ export const useBroadcast = (sessionId: string, currentUser: User) => {
     const handleDisconnect = () => {
       console.log('Disconnected from server');
       setIsConnected(false);
+      session.updateConnectionStatus(false);
     };
 
     const handleSessionState = (state: SessionState) => {
-      setUsers(state.users);
-      setMessages(state.messages);
-      setCounter(state.counter);
-      setLastCounterUpdate(state.lastCounterUpdate);
+      session.updateSessionState(state);
     };
 
     const handleUserJoined = (user: User) => {
-      setUsers(prev => {
-        if (prev.find(u => u.id === user.id)) return prev;
-        return [...prev, user];
-      });
+      session.addUser(user);
     };
 
     const handleUserLeft = (user: User) => {
-      setUsers(prev => prev.filter(u => u.id !== user.id));
-      setTypingUsers(prev => prev.filter(t => t.userId !== user.id));
+      session.removeUser(user.id);
     };
 
     const handleNewMessage = (message: Message) => {
-      setMessages(prev => [...prev, message]);
+      session.addMessage(message);
     };
 
     const handleMessageDeleted = ({ messageId }: { messageId: string }) => {
-      setMessages(prev => prev.filter(m => m.id !== messageId));
+      session.deleteMessage(messageId);
     };
 
     const handleCounterUpdated = ({ counter: newCounter, lastUpdate }: { counter: number; lastUpdate: CounterUpdate }) => {
-      setCounter(newCounter);
-      setLastCounterUpdate(lastUpdate);
+      // The session hook will handle the counter state updates based on the action
+      if (lastUpdate.action === 'increment') {
+        session.incrementCounter(lastUpdate);
+      } else {
+        session.decrementCounter(lastUpdate);
+      }
     };
 
     const handleUserTyping = (data: TypingUser) => {
-      setTypingUsers(prev => {
-        if (prev.find(t => t.userId === data.userId)) return prev;
-        return [...prev, data];
-      });
+      session.startTyping(data);
     };
 
     const handleUserStoppedTyping = (data: TypingUser) => {
-      setTypingUsers(prev => prev.filter(t => t.userId !== data.userId));
+      session.stopTyping(data.userId);
     };
 
     const handleUserActivityUpdated = ({ userId, lastActivity }: { userId: string; lastActivity: number }) => {
-      setUsers(prev => prev.map(user => 
-        user.id === userId 
-          ? { ...user, lastActivity }
-          : user
-      ));
+      session.updateUserActivity(userId, lastActivity);
     };
 
     // Set up event listeners
@@ -114,7 +109,7 @@ export const useBroadcast = (sessionId: string, currentUser: User) => {
       
       disconnectSocket();
     };
-  }, [sessionId, currentUser]);
+  }, [sessionId, currentUser, session]);
 
   // Send message
   const sendMessage = useCallback((content: string, expirationTime?: number) => {
@@ -186,11 +181,11 @@ export const useBroadcast = (sessionId: string, currentUser: User) => {
 
   return {
     isConnected,
-    users,
-    messages,
-    counter,
-    lastCounterUpdate,
-    typingUsers,
+    users: session.users,
+    messages: session.messages,
+    counter: session.counter,
+    lastCounterUpdate: session.lastCounterUpdate,
+    typingUsers: session.typingUsers,
     sendMessage,
     deleteMessage,
     updateCounter,
