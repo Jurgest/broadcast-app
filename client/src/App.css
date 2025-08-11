@@ -362,3 +362,20 @@
 .user-status.online {
   background-color: var(--accent-success);
 }
+
+.connection-status {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+.connection-status.connected {
+  color: var(--accent-success);
+  background-color: rgb(16 185 129 / 0.1);
+}
+
+.connection-status.disconnected {
+  color: var(--accent-error);
+  background-color: rgb(239 68 68 / 0.1);
+}

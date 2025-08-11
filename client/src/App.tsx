@@ -1,25 +1,40 @@
 import { useState } from 'react';
+import React from 'react';
 import './App.css';
 import { ThemeToggle } from './components/ThemeToggle';
 import { SessionSetup } from './components/SessionSetup';
 import { UserList } from './components/UserList';
+import { useBroadcast } from './hooks/useBroadcast';
 import type { User } from './types';
-import { generateRandomColor } from './utils/helpers';
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sessionId, setSessionId] = useState('');
-  const [users, setUsers] = useState<User[]>([]);
 
   const handleJoinSession = (sessionId: string, user: User) => {
     setSessionId(sessionId);
     setCurrentUser(user);
-    setUsers([user]); // Start with just the current user
   };
 
-  if (!currentUser) {
+  if (!currentUser || !sessionId) {
     return <SessionSetup onJoinSession={handleJoinSession} />;
   }
+
+  return <Dashboard sessionId={sessionId} currentUser={currentUser} />;
+}
+
+interface DashboardProps {
+  sessionId: string;
+  currentUser: User;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ sessionId, currentUser }) => {
+  const { 
+    isConnected, 
+    users, 
+    counter, 
+    updateCounter 
+  } = useBroadcast(sessionId, currentUser);
 
   return (
     <div className="app">
@@ -29,6 +44,9 @@ function App() {
           <div className="session-info">
             <span>Session: {sessionId}</span>
             <span>User: {currentUser.name}</span>
+            <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+              {isConnected ? '● Connected' : '○ Disconnected'}
+            </span>
           </div>
           <ThemeToggle />
         </div>
@@ -43,9 +61,21 @@ function App() {
           <div className="panel">
             <h3>Shared Counter</h3>
             <div className="counter-container">
-              <button className="button">-</button>
-              <span className="counter-value">0</span>
-              <button className="button">+</button>
+              <button 
+                className="button" 
+                onClick={() => updateCounter('decrement')}
+                disabled={!isConnected}
+              >
+                -
+              </button>
+              <span className="counter-value">{counter}</span>
+              <button 
+                className="button" 
+                onClick={() => updateCounter('increment')}
+                disabled={!isConnected}
+              >
+                +
+              </button>
             </div>
           </div>
         </div>
