@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import './App.css';
+import { ThemeToggle } from './components/ThemeToggle';
 
 function App() {
   const [sessionId, setSessionId] = useState('');
@@ -49,9 +50,12 @@ function App() {
     <div className="app">
       <header className="header">
         <h1>Collaboration Dashboard</h1>
-        <div className="session-info">
-          <span>Session: {sessionId}</span>
-          <span>User: {username}</span>
+        <div className="header-controls">
+          <div className="session-info">
+            <span>Session: {sessionId}</span>
+            <span>User: {username}</span>
+          </div>
+          <ThemeToggle />
         </div>
       </header>
       
