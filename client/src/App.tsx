@@ -1,49 +1,24 @@
 import { useState } from 'react';
 import './App.css';
 import { ThemeToggle } from './components/ThemeToggle';
+import { SessionSetup } from './components/SessionSetup';
+import { UserList } from './components/UserList';
+import type { User } from './types';
+import { generateRandomColor } from './utils/helpers';
 
 function App() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sessionId, setSessionId] = useState('');
-  const [username, setUsername] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
 
-  const handleJoinSession = () => {
-    if (sessionId.trim() && username.trim()) {
-      setIsConnected(true);
-    }
+  const handleJoinSession = (sessionId: string, user: User) => {
+    setSessionId(sessionId);
+    setCurrentUser(user);
+    setUsers([user]); // Start with just the current user
   };
 
-  if (!isConnected) {
-    return (
-      <div className="app">
-        <div className="login-container">
-          <h1>Cross-Tab Collaboration Dashboard</h1>
-          <div className="login-form">
-            <input
-              type="text"
-              placeholder="Enter session ID"
-              value={sessionId}
-              onChange={(e) => setSessionId(e.target.value)}
-              className="input"
-            />
-            <input
-              type="text"
-              placeholder="Enter your username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="input"
-            />
-            <button 
-              onClick={handleJoinSession}
-              className="button button-primary"
-              disabled={!sessionId.trim() || !username.trim()}
-            >
-              Join Session
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  if (!currentUser) {
+    return <SessionSetup onJoinSession={handleJoinSession} />;
   }
 
   return (
@@ -53,7 +28,7 @@ function App() {
         <div className="header-controls">
           <div className="session-info">
             <span>Session: {sessionId}</span>
-            <span>User: {username}</span>
+            <span>User: {currentUser.name}</span>
           </div>
           <ThemeToggle />
         </div>
@@ -62,13 +37,7 @@ function App() {
       <main className="main-content">
         <div className="left-panel">
           <div className="panel">
-            <h3>Users Online</h3>
-            <div className="user-list">
-              <div className="user-item">
-                <div className="user-avatar">{username[0]?.toUpperCase()}</div>
-                <span>{username} (you)</span>
-              </div>
-            </div>
+            <UserList users={users} currentUserId={currentUser.id} />
           </div>
           
           <div className="panel">
