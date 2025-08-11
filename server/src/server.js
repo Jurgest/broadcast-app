@@ -10,6 +10,8 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { validateSession } from './middleware/validateSession.js';
 import sessionRoutes from './routes/sessionRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import counterRoutes from './routes/counterRoutes.js';
 
 const app = express();
 const server = createServer(app);
@@ -50,6 +52,8 @@ app.set('io', io);
 // API Routes
 app.use('/api/sessions', validateSession, sessionRoutes);
 app.use('/api/users', validateSession, userRoutes);
+app.use('/api/messages', validateSession, messageRoutes);
+app.use('/api/counter', validateSession, counterRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -131,6 +135,69 @@ io.on('connection', (socket) => {
     socket.to(sessionId).emit('user-joined', { ...user, lastActivity: Date.now() });
   });
 
+  // Handle messages
+  socket.on('send-message', (data) => {
+    const sessionId = userSessions.get(socket.id);
+    if (!sessionId || !sessions.has(sessionId)) return;
+
+    const session = sessions.get(sessionId);
+    const message = {
+      ...data,
+      timestamp: Date.now(),
+    };
+
+    session.messages.push(message);
+    
+    // Broadcast to all users in the session
+    io.to(sessionId).emit('new-message', message);
+  });
+
+  // Handle message deletion
+  socket.on('delete-message', (data) => {
+    const sessionId = userSessions.get(socket.id);
+    if (!sessionId || !sessions.has(sessionId)) return;
+
+    const session = sessions.get(sessionId);
+    const { messageId, userId } = data;
+    
+    // Find and remove the message if it belongs to the user
+    const messageIndex = session.messages.findIndex(
+      msg => msg.id === messageId && msg.user.id === userId
+    );
+    
+    if (messageIndex >= 0) {
+      session.messages.splice(messageIndex, 1);
+      io.to(sessionId).emit('message-deleted', { messageId });
+    }
+  });
+
+  // Handle counter updates
+  socket.on('update-counter', (data) => {
+    const sessionId = userSessions.get(socket.id);
+    if (!sessionId || !sessions.has(sessionId)) return;
+
+    const session = sessions.get(sessionId);
+    const { action, user } = data;
+    
+    if (action === 'increment') {
+      session.counter += 1;
+    } else if (action === 'decrement') {
+      session.counter -= 1;
+    }
+    
+    session.lastCounterUpdate = {
+      user,
+      action,
+      timestamp: Date.now(),
+    };
+
+    // Broadcast to all users in the session
+    io.to(sessionId).emit('counter-updated', {
+      counter: session.counter,
+      lastUpdate: session.lastCounterUpdate,
+    });
+  });
+
   // Handle typing indicators
   socket.on('typing-start', (data) => {
     const sessionId = userSessions.get(socket.id);
@@ -192,6 +259,25 @@ io.on('connection', (socket) => {
     userSessions.delete(socket.id);
   });
 });
+
+// Cleanup expired messages periodically
+setInterval(() => {
+  const now = Date.now();
+  sessions.forEach((session, sessionId) => {
+    const originalLength = session.messages.length;
+    session.messages = session.messages.filter(msg => {
+      if (!msg.expiresAt) return true;
+      return msg.expiresAt > now;
+    });
+    
+    // Notify clients if messages were removed
+    if (session.messages.length < originalLength) {
+      io.to(sessionId).emit('messages-expired', {
+        messages: session.messages
+      });
+    }
+  });
+}, 60000); // Check every minute
 
 // Start server
 server.listen(PORT, () => {
