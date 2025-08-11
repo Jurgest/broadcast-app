@@ -110,7 +110,7 @@ client/
 ### 1. Clone Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Jurgest/broadcast-app
 cd broadcast-app
 ```
 
