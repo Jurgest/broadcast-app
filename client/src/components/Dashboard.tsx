@@ -5,6 +5,8 @@ import { Counter } from './Counter';
 import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
 import { ErrorBoundary } from './ErrorBoundary';
+import { ConnectionStatus } from './ConnectionStatus';
+import { LoadingState } from './LoadingState';
 import { useCollaborativeSession } from '../hooks/useCollaborativeSession';
 import { useBroadcast } from '../hooks/useBroadcast';
 import type { User } from '../types';
@@ -40,10 +42,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
                 Collaboration Dashboard
               </h1>
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-              </div>
+              <ConnectionStatus 
+                isConnected={isConnected}
+                showText={false}
+              />
             </div>
 
             <div className="flex items-center gap-4">
@@ -135,7 +137,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </main>
 
       {/* Footer */}
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-8">
+      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
             <div className="flex items-center gap-4">
@@ -148,8 +150,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span>Counter: {session.counter}</span>
               </div>
             </div>
-            <div className="text-xs">
-              Cross-tab synchronization enabled
+            <div className="flex items-center gap-4">
+              <ConnectionStatus 
+                isConnected={isConnected}
+                className="text-xs"
+              />
+              <div className="text-xs">
+                Cross-tab synchronization enabled
+              </div>
             </div>
           </div>
         </div>
