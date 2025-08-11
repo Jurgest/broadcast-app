@@ -5,6 +5,9 @@ import compression from 'compression';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { errorHandler } from './middleware/errorHandler.js';
+import { validateSession } from './middleware/validateSession.js';
+import sessionRoutes from './routes/sessionRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,6 +33,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// API Routes
+app.use('/api/sessions', validateSession, sessionRoutes);
+app.use('/api/users', validateSession, userRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {
