@@ -53,6 +53,16 @@ A full-stack real-time collaboration application that demonstrates seamless sync
 - **Session management** with join/leave flow
 - **Real-time status indicators**
 
+## 📸 Screenshots
+
+### Login Screen
+
+![Login Screen](screenshots/login.png)
+
+### Home Dashboard
+
+![Home Dashboard](screenshots/home.png)
+
 ## 🏗️ Architecture
 
 ### Backend (Node.js + Express + Socket.io)
