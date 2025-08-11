@@ -1,15 +1,30 @@
-import express from 'express';
-import { getSessionMessages, sendMessage, deleteMessage } from '../controllers/messageController.js';
+import express from "express";
+import { body } from "express-validator";
+import { validateSession } from "../middleware/validateSession.js";
+import { messageController } from "../controllers/messageController.js";
 
 const router = express.Router();
 
-// GET /api/messages/:sessionId - Get session messages
-router.get('/:sessionId', getSessionMessages);
+// Get messages for a session
+router.get("/:sessionId", messageController.getMessages);
 
-// POST /api/messages - Send a message
-router.post('/', sendMessage);
+// Send message
+router.post(
+  "/:sessionId",
+  body("content").isString().isLength({ min: 1, max: 1000 }).trim(),
+  body("userId").isString().isLength({ min: 1, max: 50 }).trim(),
+  body("username").isString().isLength({ min: 1, max: 30 }).trim(),
+  body("expiresAt").optional().isInt(),
+  validateSession,
+  messageController.sendMessage
+);
 
-// DELETE /api/messages/:id - Delete a message
-router.delete('/:id', deleteMessage);
+// Delete message
+router.delete(
+  "/:sessionId/:messageId",
+  body("userId").isString().isLength({ min: 1, max: 50 }).trim(),
+  validateSession,
+  messageController.deleteMessage
+);
 
 export default router;

@@ -1,123 +1,90 @@
-import { v4 as uuidv4 } from 'uuid';
+import { sessionMessages, io } from "../server.js";
 
-// In-memory storage for messages (in production, use a database)
-const messages = new Map(); // sessionId -> array of messages
+export const messageController = {
+  getMessages: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
+      const messages = sessionMessages.get(sessionId) || [];
 
-export const getSessionMessages = (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    
-    if (!messages.has(sessionId)) {
-      return res.json({
+      // Filter out expired messages
+      const now = Date.now();
+      const validMessages = messages.filter(
+        (message) => !message.expiresAt || message.expiresAt > now
+      );
+
+      if (validMessages.length !== messages.length) {
+        sessionMessages.set(sessionId, validMessages);
+      }
+
+      res.json({
         success: true,
-        messages: [],
+        data: validMessages,
       });
+    } catch (error) {
+      next(error);
     }
-    
-    // Filter out expired messages
-    const now = Date.now();
-    const sessionMessages = messages.get(sessionId).filter(msg => {
-      if (!msg.expiresAt) return true;
-      return msg.expiresAt > now;
-    });
-    
-    // Update stored messages if any expired
-    if (sessionMessages.length !== messages.get(sessionId).length) {
-      messages.set(sessionId, sessionMessages);
-    }
-    
-    res.json({
-      success: true,
-      messages: sessionMessages,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to get messages',
-      details: error.message,
-    });
-  }
-};
+  },
 
-export const sendMessage = (req, res) => {
-  try {
-    const { sessionId, user, content, expirationTime } = req.body;
-    
-    if (!sessionId || !user || !content) {
-      return res.status(400).json({
-        error: 'Session ID, user, and content are required',
-      });
-    }
-    
-    const message = {
-      id: uuidv4(),
-      user,
-      content,
-      timestamp: Date.now(),
-      expiresAt: expirationTime ? Date.now() + (expirationTime * 60 * 1000) : null,
-    };
-    
-    if (!messages.has(sessionId)) {
-      messages.set(sessionId, []);
-    }
-    
-    messages.get(sessionId).push(message);
-    
-    // Emit to socket clients
-    const io = req.app.get('io');
-    if (io) {
-      io.to(sessionId).emit('new-message', message);
-    }
-    
-    res.json({
-      success: true,
-      message,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to send message',
-      details: error.message,
-    });
-  }
-};
+  sendMessage: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
+      const { content, userId, username, expiresAt } = req.body;
 
-export const deleteMessage = (req, res) => {
-  try {
-    const { id } = req.params;
-    const { sessionId, userId } = req.body;
-    
-    if (!messages.has(sessionId)) {
-      return res.status(404).json({
-        error: 'Session not found',
+      const message = {
+        id: Date.now().toString(),
+        userId,
+        username,
+        content,
+        timestamp: Date.now(),
+        expiresAt: expiresAt || null,
+      };
+
+      if (!sessionMessages.has(sessionId)) {
+        sessionMessages.set(sessionId, []);
+      }
+
+      sessionMessages.get(sessionId).push(message);
+
+      // Emit to all clients in the session
+      io.to(sessionId).emit("new-message", message);
+
+      res.status(201).json({
+        success: true,
+        data: message,
       });
+    } catch (error) {
+      next(error);
     }
-    
-    const sessionMessages = messages.get(sessionId);
-    const messageIndex = sessionMessages.findIndex(
-      msg => msg.id === id && msg.user.id === userId
-    );
-    
-    if (messageIndex === -1) {
-      return res.status(404).json({
-        error: 'Message not found or unauthorized',
+  },
+
+  deleteMessage: async (req, res, next) => {
+    try {
+      const { sessionId, messageId } = req.params;
+      const { userId } = req.body;
+
+      const messages = sessionMessages.get(sessionId) || [];
+      const messageIndex = messages.findIndex(
+        (m) => m.id === messageId && m.userId === userId
+      );
+
+      if (messageIndex === -1) {
+        return res.status(404).json({
+          success: false,
+          error: "Message not found or unauthorized",
+        });
+      }
+
+      messages.splice(messageIndex, 1);
+
+      // Emit to all clients in the session
+      io.to(sessionId).emit("message-deleted", messageId);
+
+      res.json({
+        success: true,
+        data: { messageId, deletedAt: Date.now() },
       });
+    } catch (error) {
+      next(error);
     }
-    
-    sessionMessages.splice(messageIndex, 1);
-    
-    // Emit to socket clients
-    const io = req.app.get('io');
-    if (io) {
-      io.to(sessionId).emit('message-deleted', { messageId: id });
-    }
-    
-    res.json({
-      success: true,
-      message: 'Message deleted successfully',
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to delete message',
-      details: error.message,
-    });
-  }
+  },
 };

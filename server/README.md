@@ -1,15 +1,13 @@
 # Broadcast App Server
 
-Backend server for the Cross-Tab Collaboration Dashboard.
+Backend server for the Cross-Tab Collaboration Dashboard built with Express.js and Socket.io.
 
-## Getting Started
+## Features
 
-```bash
-npm install
-npm run dev
-```
-
-Server will run on http://localhost:3001
+- Real-time WebSocket communication
+- RESTful API endpoints
+- Session management
+- Message handling with expiration
 - User presence tracking
 - Shared counter synchronization
 - Error handling and validation

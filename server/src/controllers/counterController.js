@@ -1,122 +1,47 @@
-// In-memory storage for counters (in production, use a database)
-const counters = new Map(); // sessionId -> { value, lastUpdate }
+import { sessionCounters, io } from "../server.js";
 
-export const getCounter = (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    
-    if (!counters.has(sessionId)) {
-      counters.set(sessionId, {
-        value: 0,
-        lastUpdate: null,
-      });
-    }
-    
-    const counter = counters.get(sessionId);
-    
-    res.json({
-      success: true,
-      counter: counter.value,
-      lastUpdate: counter.lastUpdate,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to get counter',
-      details: error.message,
-    });
-  }
-};
+export const counterController = {
+  getCounter: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
 
-export const incrementCounter = (req, res) => {
-  try {
-    const { sessionId, user } = req.body;
-    
-    if (!sessionId || !user) {
-      return res.status(400).json({
-        error: 'Session ID and user are required',
-      });
-    }
-    
-    if (!counters.has(sessionId)) {
-      counters.set(sessionId, {
+      const counter = sessionCounters.get(sessionId) || {
         value: 0,
-        lastUpdate: null,
-      });
-    }
-    
-    const counter = counters.get(sessionId);
-    counter.value += 1;
-    counter.lastUpdate = {
-      user,
-      action: 'increment',
-      timestamp: Date.now(),
-    };
-    
-    // Emit to socket clients
-    const io = req.app.get('io');
-    if (io) {
-      io.to(sessionId).emit('counter-updated', {
-        counter: counter.value,
-        lastUpdate: counter.lastUpdate,
-      });
-    }
-    
-    res.json({
-      success: true,
-      counter: counter.value,
-      lastUpdate: counter.lastUpdate,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to increment counter',
-      details: error.message,
-    });
-  }
-};
+        lastUser: null,
+        timestamp: Date.now(),
+      };
 
-export const decrementCounter = (req, res) => {
-  try {
-    const { sessionId, user } = req.body;
-    
-    if (!sessionId || !user) {
-      return res.status(400).json({
-        error: 'Session ID and user are required',
+      res.json({
+        success: true,
+        data: counter,
       });
+    } catch (error) {
+      next(error);
     }
-    
-    if (!counters.has(sessionId)) {
-      counters.set(sessionId, {
-        value: 0,
-        lastUpdate: null,
+  },
+
+  updateCounter: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
+      const { value, userId, username } = req.body;
+
+      const counter = {
+        value,
+        lastUser: username,
+        timestamp: Date.now(),
+      };
+
+      sessionCounters.set(sessionId, counter);
+
+      // Emit to all clients in the session
+      io.to(sessionId).emit("counter-updated", counter);
+
+      res.json({
+        success: true,
+        data: counter,
       });
+    } catch (error) {
+      next(error);
     }
-    
-    const counter = counters.get(sessionId);
-    counter.value -= 1;
-    counter.lastUpdate = {
-      user,
-      action: 'decrement',
-      timestamp: Date.now(),
-    };
-    
-    // Emit to socket clients
-    const io = req.app.get('io');
-    if (io) {
-      io.to(sessionId).emit('counter-updated', {
-        counter: counter.value,
-        lastUpdate: counter.lastUpdate,
-      });
-    }
-    
-    res.json({
-      success: true,
-      counter: counter.value,
-      lastUpdate: counter.lastUpdate,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to decrement counter',
-      details: error.message,
-    });
-  }
+  },
 };

@@ -1,70 +1,121 @@
-import { v4 as uuidv4 } from 'uuid';
+import {
+  activeSessions,
+  activeUsers,
+  sessionMessages,
+  sessionCounters,
+} from "../server.js";
 
-// In-memory storage for sessions (in production, use a database)
-const sessions = new Map();
+export const sessionController = {
+  createSession: async (req, res, next) => {
+    try {
+      const { sessionId } = req.body;
 
-export const createSession = (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    const id = sessionId || uuidv4();
-    
-    if (!sessions.has(id)) {
-      sessions.set(id, {
-        id,
-        users: [],
-        messages: [],
-        counter: 0,
-        createdAt: new Date().toISOString(),
-        lastActivity: new Date().toISOString(),
+      if (!activeSessions.has(sessionId)) {
+        activeSessions.set(sessionId, new Set());
+        sessionMessages.set(sessionId, []);
+        sessionCounters.set(sessionId, {
+          value: 0,
+          lastUser: null,
+          timestamp: Date.now(),
+        });
+      }
+
+      res.status(201).json({
+        success: true,
+        data: {
+          sessionId,
+          createdAt: Date.now(),
+          activeUsers: activeSessions.get(sessionId).size,
+        },
       });
+    } catch (error) {
+      next(error);
     }
-    
-    const session = sessions.get(id);
-    res.json({
-      success: true,
-      session: {
-        id: session.id,
-        userCount: session.users.length,
-        messageCount: session.messages.length,
-        counter: session.counter,
-        createdAt: session.createdAt,
-        lastActivity: session.lastActivity,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to create session',
-      details: error.message,
-    });
-  }
-};
+  },
 
-export const getSession = (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    if (!sessions.has(id)) {
-      return res.status(404).json({
-        error: 'Session not found',
+  getSession: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
+
+      const session = activeSessions.get(sessionId);
+      if (!session) {
+        return res.status(404).json({
+          success: false,
+          error: "Session not found",
+        });
+      }
+
+      const users = Array.from(session)
+        .map((socketId) => activeUsers.get(socketId))
+        .filter(Boolean);
+
+      res.json({
+        success: true,
+        data: {
+          sessionId,
+          activeUsers: users.length,
+          users: users.map((user) => ({
+            userId: user.userId,
+            username: user.username,
+            lastActivity: user.lastActivity,
+          })),
+          messages: sessionMessages.get(sessionId) || [],
+          counter: sessionCounters.get(sessionId) || {
+            value: 0,
+            lastUser: null,
+            timestamp: Date.now(),
+          },
+        },
       });
+    } catch (error) {
+      next(error);
     }
-    
-    const session = sessions.get(id);
-    res.json({
-      success: true,
-      session: {
-        id: session.id,
-        userCount: session.users.length,
-        messageCount: session.messages.length,
-        counter: session.counter,
-        createdAt: session.createdAt,
-        lastActivity: session.lastActivity,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Failed to get session',
-      details: error.message,
-    });
-  }
+  },
+
+  joinSession: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
+      const { userId, username } = req.body;
+
+      if (!activeSessions.has(sessionId)) {
+        activeSessions.set(sessionId, new Set());
+        sessionMessages.set(sessionId, []);
+        sessionCounters.set(sessionId, {
+          value: 0,
+          lastUser: null,
+          timestamp: Date.now(),
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          sessionId,
+          userId,
+          username,
+          joinedAt: Date.now(),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  leaveSession: async (req, res, next) => {
+    try {
+      const { sessionId } = req.params;
+      const { userId } = req.body;
+
+      res.json({
+        success: true,
+        data: {
+          sessionId,
+          userId,
+          leftAt: Date.now(),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

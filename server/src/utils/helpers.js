@@ -1,25 +1,51 @@
+export const generateRandomUsername = () => {
+  const adjectives = [
+    "Happy",
+    "Lucky",
+    "Smart",
+    "Cool",
+    "Fast",
+    "Brave",
+    "Kind",
+    "Wise",
+    "Strong",
+    "Quick",
+  ];
+  const nouns = [
+    "Cat",
+    "Dog",
+    "Lion",
+    "Eagle",
+    "Tiger",
+    "Bear",
+    "Wolf",
+    "Fox",
+    "Owl",
+    "Shark",
+  ];
+  const randomNum = Math.floor(Math.random() * 1000);
+
+  const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+
+  return `${adjective}${noun}${randomNum}`;
+};
+
+export const generateUserId = () => {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+};
+
+export const isExpired = (timestamp, expirationTime) => {
+  return Date.now() > timestamp + expirationTime;
+};
+
+export const sanitizeMessage = (content) => {
+  return content.replace(
+    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    ""
+  );
+};
+
 export const formatTimestamp = (timestamp) => {
   return new Date(timestamp).toISOString();
-};
-
-export const isValidUUID = (str) => {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(str);
-};
-
-export const sanitizeString = (str, maxLength = 1000) => {
-  if (typeof str !== 'string') return '';
-  return str.trim().substring(0, maxLength);
-};
-
-export const createResponse = (success, data, error = null) => {
-  const response = { success };
-  
-  if (success) {
-    Object.assign(response, data);
-  } else {
-    response.error = error;
-  }
-  
-  return response;
 };

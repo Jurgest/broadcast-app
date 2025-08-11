@@ -1,26 +1,41 @@
 export const errorHandler = (err, req, res, next) => {
-  console.error('Error:', err.stack);
+  console.error("Error:", err);
 
-  // Handle different types of errors
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({
-      error: 'Validation Error',
-      details: err.message,
-    });
+  // Default error
+  let error = {
+    message: err.message || "Internal Server Error",
+    status: err.status || 500,
+  };
+
+  // Validation errors
+  if (err.name === "ValidationError") {
+    error.status = 400;
+    error.message = Object.values(err.errors)
+      .map((e) => e.message)
+      .join(", ");
   }
 
-  if (err.name === 'CastError') {
-    return res.status(400).json({
-      error: 'Invalid ID format',
-      details: err.message,
-    });
+  // JWT errors
+  if (err.name === "JsonWebTokenError") {
+    error.status = 401;
+    error.message = "Invalid token";
   }
 
-  // Default server error
-  res.status(500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'production' 
-      ? 'Something went wrong!' 
-      : err.message,
+  // Duplicate key error
+  if (err.code === 11000) {
+    error.status = 400;
+    error.message = "Resource already exists";
+  }
+
+  // Cast error
+  if (err.name === "CastError") {
+    error.status = 400;
+    error.message = "Invalid ID format";
+  }
+
+  res.status(error.status).json({
+    success: false,
+    error: error.message,
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 };

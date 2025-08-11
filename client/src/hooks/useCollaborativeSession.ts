@@ -1,256 +1,464 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useBroadcastSync } from '../utils/css-variables';
-import type { User, SessionState, Message, CounterUpdate, TypingUser, BroadcastData } from '../types';
+import { useState, useEffect, useCallback, useRef } from "react";
+import type {
+  User,
+  Message,
+  Counter,
+  SessionState,
+  BroadcastData,
+  CollaborativeSessionConfig,
+  TypingIndicator,
+  ActivityLog,
+} from "../types";
+import { socketManager } from "../utils/socket";
+import { debounce, isMessageExpired } from "../utils/helpers";
+import { useBroadcast } from "./useBroadcast";
 
-interface CollaborativeSessionOptions {
-  sessionId: string;
-  user: User;
-  enableBroadcastChannel?: boolean;
-}
+export const useCollaborativeSession = (config: CollaborativeSessionConfig) => {
+  const {
+    sessionId,
+    userId,
+    username,
+    channelName = `session-${sessionId}`,
+  } = config;
 
-export const useCollaborativeSession = ({ 
-  sessionId, 
-  user, 
-  enableBroadcastChannel = true 
-}: CollaborativeSessionOptions) => {
   // Local state
-  const [users, setUsers] = useState<User[]>([user]);
+  const [users, setUsers] = useState<User[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [counter, setCounter] = useState(0);
-  const [lastCounterUpdate, setLastCounterUpdate] = useState<CounterUpdate | null>(null);
-  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
-
-  // Cross-tab sync configuration
-  const { broadcast, subscribe } = useBroadcastSync<BroadcastData>({
-    channel: `collaboration-${sessionId}`,
-    enabled: enableBroadcastChannel,
+  const [counter, setCounter] = useState<Counter>({
+    value: 0,
+    lastUser: null,
+    timestamp: Date.now(),
   });
+  const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]);
+  const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Broadcast data to other tabs
-  const broadcastToTabs = useCallback((type: string, payload: unknown) => {
-    if (enableBroadcastChannel) {
-      const data: BroadcastData = {
+  // Refs for cleanup
+  const typingTimeoutRef = useRef<Map<string, number>>(new Map());
+  const messageExpirationTimeoutRef = useRef<Map<string, number>>(new Map());
+
+  // Broadcast channel setup
+  const { broadcast, subscribe } = useBroadcast(channelName);
+
+  // Activity log function (defined early to avoid hoisting issues)
+  const addActivityLog = useCallback(
+    (
+      type: "join" | "leave" | "message" | "counter" | "typing",
+      userId: string,
+      username: string,
+      description: string
+    ) => {
+      const log: ActivityLog = {
+        id: Date.now().toString(),
         type,
-        payload,
+        userId,
+        username,
+        description,
         timestamp: Date.now(),
       };
-      broadcast(data);
-    }
-  }, [broadcast, enableBroadcastChannel]);
 
-  // Handle incoming broadcast messages from other tabs
+      setActivityLog((prev) => [...prev, log].slice(-50)); // Keep last 50 logs
+
+      // Broadcast activity to other tabs
+      broadcast({
+        type: "ACTIVITY_LOG",
+        payload: log,
+        userId,
+        timestamp: Date.now(),
+      });
+    },
+    [broadcast]
+  );
+
+  // Socket connection and event handlers
   useEffect(() => {
-    if (!enableBroadcastChannel) return;
+    const socket = socketManager.connect();
 
+    const handleConnect = () => {
+      setIsConnected(true);
+      setError(null);
+      socket.emit("join-session", sessionId, userId, username);
+    };
+
+    const handleDisconnect = () => {
+      setIsConnected(false);
+    };
+
+    const handleConnectError = (error: Error) => {
+      setError(`Connection failed: ${error.message}`);
+      setIsConnected(false);
+    };
+
+    const handleSessionState = (state: SessionState) => {
+      setUsers(state.users);
+      setMessages(state.messages.filter((msg) => !isMessageExpired(msg)));
+      setCounter(state.counter);
+      setLoading(false);
+    };
+
+    const handleUserJoined = (user: User) => {
+      setUsers((prev) => {
+        const exists = prev.some((u) => u.userId === user.userId);
+        if (!exists) {
+          addActivityLog(
+            "join",
+            user.userId,
+            user.username,
+            `${user.username} joined the session`
+          );
+          return [...prev, user];
+        }
+        return prev;
+      });
+
+      // Broadcast to other tabs
+      broadcast({
+        type: "USER_JOIN",
+        payload: user,
+        timestamp: Date.now(),
+        userId,
+      });
+    };
+
+    const handleUserLeft = (user: User) => {
+      setUsers((prev) => prev.filter((u) => u.userId !== user.userId));
+      setTypingUsers((prev) => prev.filter((t) => t.userId !== user.userId));
+      addActivityLog(
+        "leave",
+        user.userId,
+        user.username,
+        `${user.username} left the session`
+      );
+
+      // Broadcast to other tabs
+      broadcast({
+        type: "USER_LEAVE",
+        payload: user,
+        timestamp: Date.now(),
+        userId,
+      });
+    };
+
+    const handleNewMessage = (message: Message) => {
+      setMessages((prev) => {
+        const exists = prev.some((m) => m.id === message.id);
+        if (!exists) {
+          addActivityLog(
+            "message",
+            message.userId,
+            message.username,
+            `${message.username} sent a message`
+          );
+
+          // Set expiration timeout if message has expiration
+          if (message.expiresAt) {
+            const timeUntilExpiration = message.expiresAt - Date.now();
+            if (timeUntilExpiration > 0) {
+              const timeoutId = window.setTimeout(() => {
+                setMessages((prev) => prev.filter((m) => m.id !== message.id));
+                messageExpirationTimeoutRef.current.delete(message.id);
+              }, timeUntilExpiration);
+              messageExpirationTimeoutRef.current.set(message.id, timeoutId);
+            }
+          }
+
+          return [...prev, message];
+        }
+        return prev;
+      });
+
+      // Broadcast to other tabs
+      broadcast({
+        type: "MESSAGE_SEND",
+        payload: message,
+        timestamp: Date.now(),
+        userId,
+      });
+    };
+
+    const handleMessageDeleted = (messageId: string) => {
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+
+      // Clear expiration timeout
+      const timeoutId = messageExpirationTimeoutRef.current.get(messageId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        messageExpirationTimeoutRef.current.delete(messageId);
+      }
+
+      // Broadcast to other tabs
+      broadcast({
+        type: "MESSAGE_DELETE",
+        payload: { messageId },
+        timestamp: Date.now(),
+        userId,
+      });
+    };
+
+    const handleCounterUpdated = (newCounter: Counter) => {
+      setCounter(newCounter);
+      addActivityLog(
+        "counter",
+        newCounter.lastUser || "Unknown",
+        newCounter.lastUser || "Unknown",
+        `Counter updated to ${newCounter.value}`
+      );
+
+      // Broadcast to other tabs
+      broadcast({
+        type: "COUNTER_UPDATE",
+        payload: newCounter,
+        timestamp: Date.now(),
+        userId,
+      });
+    };
+
+    const handleUserTyping = (typingData: TypingIndicator) => {
+      if (typingData.isTyping) {
+        setTypingUsers((prev) => {
+          const filtered = prev.filter((t) => t.userId !== typingData.userId);
+          return [...filtered, typingData];
+        });
+
+        // Clear existing timeout
+        const existingTimeout = typingTimeoutRef.current.get(typingData.userId);
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+
+        // Set new timeout
+        const timeoutId = window.setTimeout(() => {
+          setTypingUsers((prev) =>
+            prev.filter((t) => t.userId !== typingData.userId)
+          );
+          typingTimeoutRef.current.delete(typingData.userId);
+        }, 3000);
+
+        typingTimeoutRef.current.set(typingData.userId, timeoutId);
+      } else {
+        setTypingUsers((prev) =>
+          prev.filter((t) => t.userId !== typingData.userId)
+        );
+        const timeoutId = typingTimeoutRef.current.get(typingData.userId);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          typingTimeoutRef.current.delete(typingData.userId);
+        }
+      }
+    };
+
+    const handleMessagesExpired = (validMessages: Message[]) => {
+      setMessages(validMessages);
+    };
+
+    // Attach event listeners
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
+    socket.on("session-state", handleSessionState);
+    socket.on("user-joined", handleUserJoined);
+    socket.on("user-left", handleUserLeft);
+    socket.on("new-message", handleNewMessage);
+    socket.on("message-deleted", handleMessageDeleted);
+    socket.on("counter-updated", handleCounterUpdated);
+    socket.on("user-typing", handleUserTyping);
+    socket.on("messages-expired", handleMessagesExpired);
+
+    // If already connected, join session immediately
+    if (socket.connected) {
+      handleConnect();
+    }
+
+    return () => {
+      // Cleanup event listeners
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
+      socket.off("session-state", handleSessionState);
+      socket.off("user-joined", handleUserJoined);
+      socket.off("user-left", handleUserLeft);
+      socket.off("new-message", handleNewMessage);
+      socket.off("message-deleted", handleMessageDeleted);
+      socket.off("counter-updated", handleCounterUpdated);
+      socket.off("user-typing", handleUserTyping);
+      socket.off("messages-expired", handleMessagesExpired);
+    };
+  }, [sessionId, userId, username, broadcast, addActivityLog]);
+
+  // Subscribe to broadcast messages from other tabs
+  useEffect(() => {
     const unsubscribe = subscribe((data: BroadcastData) => {
+      // Only process messages from other tabs (different userId)
+      if (data.userId === userId) return;
+
       switch (data.type) {
-        case 'USER_JOINED':
-          setUsers(prev => {
+        case "USER_JOIN":
+          setUsers((prev) => {
             const user = data.payload as User;
-            if (prev.find(u => u.id === user.id)) return prev;
-            return [...prev, user];
+            const exists = prev.some((u) => u.userId === user.userId);
+            return exists ? prev : [...prev, user];
           });
           break;
 
-        case 'USER_LEFT':
-          setUsers(prev => {
+        case "USER_LEAVE":
+          setUsers((prev) => {
             const user = data.payload as User;
-            return prev.filter(u => u.id !== user.id);
+            return prev.filter((u) => u.userId !== user.userId);
           });
           break;
 
-        case 'MESSAGE_ADDED':
-          setMessages(prev => {
+        case "MESSAGE_SEND":
+          setMessages((prev) => {
             const message = data.payload as Message;
-            if (prev.find(m => m.id === message.id)) return prev;
-            return [...prev, message];
+            const exists = prev.some((m) => m.id === message.id);
+            return exists ? prev : [...prev, message];
           });
           break;
 
-        case 'MESSAGE_DELETED':
-          setMessages(prev => {
-            const messageId = data.payload as string;
-            return prev.filter(m => m.id !== messageId);
-          });
-          break;
-
-        case 'COUNTER_UPDATED': {
-          const counterData = data.payload as { counter: number; lastUpdate: CounterUpdate };
-          setCounter(counterData.counter);
-          setLastCounterUpdate(counterData.lastUpdate);
+        case "MESSAGE_DELETE": {
+          const { messageId } = data.payload as { messageId: string };
+          setMessages((prev) => prev.filter((m) => m.id !== messageId));
           break;
         }
 
-        case 'TYPING_START':
-          setTypingUsers(prev => {
-            const typingUser = data.payload as TypingUser;
-            if (prev.find(t => t.userId === typingUser.userId)) return prev;
-            return [...prev, typingUser];
-          });
+        case "COUNTER_UPDATE":
+          setCounter(data.payload as Counter);
           break;
-
-        case 'TYPING_STOP':
-          setTypingUsers(prev => {
-            const typingUser = data.payload as TypingUser;
-            return prev.filter(t => t.userId !== typingUser.userId);
-          });
-          break;
-
-        case 'SESSION_STATE': {
-          const sessionState = data.payload as SessionState;
-          setUsers(sessionState.users);
-          setMessages(sessionState.messages);
-          setCounter(sessionState.counter);
-          setLastCounterUpdate(sessionState.lastCounterUpdate);
-          break;
-        }
-
-        case 'CONNECTION_STATUS':
-          setIsConnected(data.payload as boolean);
-          break;
-
-        default:
-          console.warn('Unknown broadcast message type:', data.type);
       }
     });
 
     return unsubscribe;
-  }, [subscribe, enableBroadcastChannel]);
+  }, [subscribe, userId]);
 
-  // Session actions
-  const actions = {
-    // User management
-    addUser: useCallback((newUser: User) => {
-      setUsers(prev => {
-        if (prev.find(u => u.id === newUser.id)) return prev;
-        const updated = [...prev, newUser];
-        broadcastToTabs('USER_JOINED', newUser);
-        return updated;
-      });
-    }, [broadcastToTabs]),
-
-    removeUser: useCallback((userId: string) => {
-      setUsers(prev => {
-        const user = prev.find(u => u.id === userId);
-        if (!user) return prev;
-        const updated = prev.filter(u => u.id !== userId);
-        broadcastToTabs('USER_LEFT', user);
-        return updated;
-      });
-    }, [broadcastToTabs]),
-
-    updateUserActivity: useCallback((userId: string, lastActivity: number) => {
-      setUsers(prev => prev.map(user => 
-        user.id === userId 
-          ? { ...user, lastActivity }
-          : user
-      ));
-    }, []),
-
-    // Message management
-    addMessage: useCallback((message: Message) => {
-      setMessages(prev => {
-        if (prev.find(m => m.id === message.id)) return prev;
-        const updated = [...prev, message];
-        broadcastToTabs('MESSAGE_ADDED', message);
-        return updated;
-      });
-    }, [broadcastToTabs]),
-
-    deleteMessage: useCallback((messageId: string) => {
-      setMessages(prev => {
-        const updated = prev.filter(m => m.id !== messageId);
-        broadcastToTabs('MESSAGE_DELETED', messageId);
-        return updated;
-      });
-    }, [broadcastToTabs]),
-
-    // Counter management
-    incrementCounter: useCallback((updateInfo: CounterUpdate) => {
-      setCounter(prev => {
-        const newValue = prev + 1;
-        setLastCounterUpdate(updateInfo);
-        broadcastToTabs('COUNTER_UPDATED', { 
-          counter: newValue, 
-          lastUpdate: updateInfo 
-        });
-        return newValue;
-      });
-    }, [broadcastToTabs]),
-
-    decrementCounter: useCallback((updateInfo: CounterUpdate) => {
-      setCounter(prev => {
-        const newValue = prev - 1;
-        setLastCounterUpdate(updateInfo);
-        broadcastToTabs('COUNTER_UPDATED', { 
-          counter: newValue, 
-          lastUpdate: updateInfo 
-        });
-        return newValue;
-      });
-    }, [broadcastToTabs]),
-
-    // Typing indicators
-    startTyping: useCallback((typingUser: TypingUser) => {
-      setTypingUsers(prev => {
-        if (prev.find(t => t.userId === typingUser.userId)) return prev;
-        const updated = [...prev, typingUser];
-        broadcastToTabs('TYPING_START', typingUser);
-        return updated;
-      });
-    }, [broadcastToTabs]),
-
-    stopTyping: useCallback((userId: string) => {
-      setTypingUsers(prev => {
-        const typingUser = prev.find(t => t.userId === userId);
-        if (!typingUser) return prev;
-        const updated = prev.filter(t => t.userId !== userId);
-        broadcastToTabs('TYPING_STOP', typingUser);
-        return updated;
-      });
-    }, [broadcastToTabs]),
-
-    // Session state management
-    updateSessionState: useCallback((state: SessionState) => {
-      setUsers(state.users);
-      setMessages(state.messages);
-      setCounter(state.counter);
-      setLastCounterUpdate(state.lastCounterUpdate);
-      broadcastToTabs('SESSION_STATE', state);
-    }, [broadcastToTabs]),
-
-    updateConnectionStatus: useCallback((connected: boolean) => {
-      setIsConnected(connected);
-      broadcastToTabs('CONNECTION_STATUS', connected);
-    }, [broadcastToTabs]),
-  };
-
-  // Cleanup expired messages
+  // Clean up expired messages periodically
   useEffect(() => {
     const interval = setInterval(() => {
-      const now = Date.now();
-      setMessages(prev => prev.filter(msg => {
-        if (!msg.expiresAt) return true;
-        return msg.expiresAt > now;
-      }));
+      setMessages((prev) => prev.filter((msg) => !isMessageExpired(msg)));
     }, 60000); // Check every minute
 
     return () => clearInterval(interval);
   }, []);
 
+  // Actions
+  const sendMessage = useCallback(
+    (content: string, expiresInMinutes?: number) => {
+      if (!content.trim()) return;
+
+      const socket = socketManager.getSocket();
+      if (!socket?.connected) {
+        setError("Not connected to server");
+        return;
+      }
+
+      const expiresAt = expiresInMinutes
+        ? Date.now() + expiresInMinutes * 60 * 1000
+        : null;
+
+      socket.emit("send-message", {
+        content: content.trim(),
+        expiresAt,
+      });
+    },
+    []
+  );
+
+  const deleteMessage = useCallback((messageId: string) => {
+    const socket = socketManager.getSocket();
+    if (!socket?.connected) {
+      setError("Not connected to server");
+      return;
+    }
+
+    socket.emit("delete-message", messageId);
+  }, []);
+
+  const updateCounter = useCallback((newValue: number) => {
+    const socket = socketManager.getSocket();
+    if (!socket?.connected) {
+      setError("Not connected to server");
+      return;
+    }
+
+    socket.emit("update-counter", newValue);
+  }, []);
+
+  const incrementCounter = useCallback(() => {
+    updateCounter(counter.value + 1);
+  }, [counter.value, updateCounter]);
+
+  const decrementCounter = useCallback(() => {
+    updateCounter(counter.value - 1);
+  }, [counter.value, updateCounter]);
+
+  // Debounced typing indicator
+  const debouncedStopTyping = useCallback(() => {
+    const stopTypingDebounced = debounce(() => {
+      const socket = socketManager.getSocket();
+      if (socket?.connected) {
+        socket.emit("typing", false);
+      }
+    }, 1000);
+    return stopTypingDebounced;
+  }, []);
+
+  const markTyping = useCallback(() => {
+    const socket = socketManager.getSocket();
+    if (socket?.connected) {
+      socket.emit("typing", true);
+      debouncedStopTyping()();
+    }
+  }, [debouncedStopTyping]);
+
+  const stopTyping = useCallback(() => {
+    const socket = socketManager.getSocket();
+    if (socket?.connected) {
+      socket.emit("typing", false);
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    const typingTimeouts = typingTimeoutRef.current;
+    const messageTimeouts = messageExpirationTimeoutRef.current;
+
+    return () => {
+      // Clear all timeouts using captured values
+      typingTimeouts.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      messageTimeouts.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+
+      typingTimeouts.clear();
+      messageTimeouts.clear();
+    };
+  }, []);
+
   return {
     // State
-    sessionId,
-    user,
     users,
     messages,
     counter,
-    lastCounterUpdate,
     typingUsers,
+    activityLog,
     isConnected,
-    
+    error,
+    loading,
+
     // Actions
-    ...actions,
+    sendMessage,
+    deleteMessage,
+    updateCounter,
+    incrementCounter,
+    decrementCounter,
+    markTyping,
+    stopTyping,
+
+    // Utils
+    clearError: () => setError(null),
+    reconnect: () => socketManager.connect(),
   };
 };

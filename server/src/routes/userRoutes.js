@@ -1,15 +1,12 @@
-import express from 'express';
-import { addUser, getSessionUsers, removeUser } from '../controllers/userController.js';
+import express from "express";
+import { userController } from "../controllers/userController.js";
 
 const router = express.Router();
 
-// POST /api/users - Add user to session
-router.post('/', addUser);
+// Get active users in session
+router.get("/:sessionId", userController.getActiveUsers);
 
-// GET /api/users/:sessionId - Get all users in session
-router.get('/:sessionId', getSessionUsers);
-
-// DELETE /api/users/:id - Remove user from session
-router.delete('/:id', removeUser);
+// Update user activity
+router.post("/:sessionId/activity", userController.updateActivity);
 
 export default router;
