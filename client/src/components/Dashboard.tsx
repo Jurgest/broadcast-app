@@ -2,7 +2,9 @@ import React from 'react';
 import { UserList } from './UserList';
 import { Chat } from './Chat';
 import { Counter } from './Counter';
+import { ActivityFeed } from './ActivityFeed';
 import { ThemeToggle } from './ThemeToggle';
+import { ErrorBoundary } from './ErrorBoundary';
 import { useCollaborativeSession } from '../hooks/useCollaborativeSession';
 import { useBroadcast } from '../hooks/useBroadcast';
 import type { User } from '../types';
@@ -62,37 +64,74 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[calc(100vh-12rem)]">
-          {/* Left Column - Users and Counter */}
-          <div className="lg:col-span-1 space-y-6">
-            <UserList
-              users={session.users}
-              currentUserId={user.id}
-            />
-            <Counter
-              user={user}
-              counter={session.counter}
-              lastCounterUpdate={session.lastCounterUpdate}
-              onIncrement={session.incrementCounter}
-              onDecrement={session.decrementCounter}
-              className="flex-shrink-0"
-            />
-          </div>
+        <ErrorBoundary>
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 h-[calc(100vh-12rem)]">
+            {/* Left Column - Users and Counter */}
+            <div className="xl:col-span-1 space-y-6">
+              <ErrorBoundary fallback={
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <p className="text-red-600 dark:text-red-400 text-sm">Failed to load user list</p>
+                </div>
+              }>
+                <UserList
+                  users={session.users}
+                  currentUserId={user.id}
+                />
+              </ErrorBoundary>
+              
+              <ErrorBoundary fallback={
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <p className="text-red-600 dark:text-red-400 text-sm">Failed to load counter</p>
+                </div>
+              }>
+                <Counter
+                  user={user}
+                  counter={session.counter}
+                  lastCounterUpdate={session.lastCounterUpdate}
+                  onIncrement={session.incrementCounter}
+                  onDecrement={session.decrementCounter}
+                />
+              </ErrorBoundary>
+            </div>
 
-          {/* Right Column - Chat */}
-          <div className="lg:col-span-2">
-            <Chat
-              user={user}
-              messages={session.messages}
-              typingUsers={session.typingUsers}
-              onSendMessage={session.addMessage}
-              onDeleteMessage={session.deleteMessage}
-              onStartTyping={session.startTyping}
-              onStopTyping={session.stopTyping}
-              className="h-full"
-            />
+            {/* Middle Column - Chat */}
+            <div className="xl:col-span-2">
+              <ErrorBoundary fallback={
+                <div className="h-full p-8 bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center justify-center">
+                  <p className="text-red-600 dark:text-red-400">Failed to load chat</p>
+                </div>
+              }>
+                <Chat
+                  user={user}
+                  messages={session.messages}
+                  typingUsers={session.typingUsers}
+                  onSendMessage={session.addMessage}
+                  onDeleteMessage={session.deleteMessage}
+                  onStartTyping={session.startTyping}
+                  onStopTyping={session.stopTyping}
+                  className="h-full"
+                />
+              </ErrorBoundary>
+            </div>
+
+            {/* Right Column - Activity Feed */}
+            <div className="xl:col-span-1">
+              <ErrorBoundary fallback={
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <p className="text-red-600 dark:text-red-400 text-sm">Failed to load activity feed</p>
+                </div>
+              }>
+                <ActivityFeed
+                  users={session.users}
+                  messages={session.messages}
+                  lastCounterUpdate={session.lastCounterUpdate}
+                  currentUserId={user.id}
+                  className="h-full"
+                />
+              </ErrorBoundary>
+            </div>
           </div>
-        </div>
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}

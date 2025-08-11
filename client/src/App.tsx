@@ -2,6 +2,7 @@ import { useState } from 'react';
 import './App.css';
 import { SessionSetup } from './components/SessionSetup';
 import { Dashboard } from './components/Dashboard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import type { User } from './types';
 
 function App() {
@@ -19,15 +20,21 @@ function App() {
   };
 
   if (!currentUser || !sessionId) {
-    return <SessionSetup onJoinSession={handleJoinSession} />;
+    return (
+      <ErrorBoundary>
+        <SessionSetup onJoinSession={handleJoinSession} />
+      </ErrorBoundary>
+    );
   }
 
   return (
-    <Dashboard 
-      sessionId={sessionId} 
-      user={currentUser} 
-      onLeaveSession={handleLeaveSession}
-    />
+    <ErrorBoundary>
+      <Dashboard 
+        sessionId={sessionId} 
+        user={currentUser} 
+        onLeaveSession={handleLeaveSession}
+      />
+    </ErrorBoundary>
   );
 }
 
